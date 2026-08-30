@@ -801,7 +801,18 @@ class EmbeddingRuntime:
         kwargs: dict[str, Any] = {"device": self.device}
         if self.model_revision:
             kwargs["revision"] = self.model_revision
+
+        if self.model_name.startswith("modelscope://"):
+            # 魔搭自动下载：本地无则从 ModelScope 拉取，有则用本地缓存
+            from modelscope import snapshot_download
+
+            ms_model_id = self.model_name.removeprefix("modelscope://")
+            local_dir = snapshot_download(ms_model_id)
+            kwargs.pop("revision", None)  # 本地目录不再按 HF revision 加载
+            return SentenceTransformer(local_dir, **kwargs)
+
         return SentenceTransformer(self.model_name, **kwargs)
+
 
     def _assert_owner_loop(self) -> None:
         if (

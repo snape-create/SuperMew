@@ -41,6 +41,7 @@ dependencies = [
     "beautifulsoup4>=4.12.0",
     "pyyaml>=6.0",
     "sqlglot==30.12.0",
+    "modelscope>=1.39.1",
 ]
 
 [dependency-groups]
