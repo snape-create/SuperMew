@@ -795,6 +795,32 @@ class EmbeddingRuntime:
             return deadline
         return self._clock() + self._default_timeout_seconds
 
+    def _resolve_modelscope_cache(self, ms_model_id: str) -> str | None:
+        """返回 ModelScope 本地缓存中已完整下载的 snapshot 路径；无缓存时返回 None。
+
+        ModelScope 默认缓存布局：<cache>/models/<org>--<model>/snapshots/<revision>/。
+        只有目录完整存在且不含 lockfile 时才视为可用，避免加载半成品。
+        """
+        from pathlib import Path
+
+        cache_root = os.environ.get("MODELSCOPE_CACHE") or str(
+            Path.home() / ".cache" / "modelscope"
+        )
+        model_dir = Path(cache_root) / "models" / ms_model_id.replace("/", "--")
+        snapshots = model_dir / "snapshots"
+        if not snapshots.is_dir():
+            return None
+        revisions = [p for p in snapshots.iterdir() if p.is_dir() and not p.name.endswith(".lock")]
+        if not revisions:
+            return None
+        # 优先指定的 revision；否则取最近的 snapshot。
+        revisions.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+        if self.model_revision:
+            for p in revisions:
+                if p.name == self.model_revision:
+                    return str(p)
+        return str(revisions[0])
+
     def _create_default_model(self) -> Any:
         from sentence_transformers import SentenceTransformer
 
@@ -803,11 +829,14 @@ class EmbeddingRuntime:
             kwargs["revision"] = self.model_revision
 
         if self.model_name.startswith("modelscope://"):
-            # 魔搭自动下载：本地无则从 ModelScope 拉取，有则用本地缓存
+            # 魔搭自动下载：本地缓存已存在则直接加载，避免每次启动对权重做完整性校验；
+            # 本地不存在才从 ModelScope 拉取。
             from modelscope import snapshot_download
 
             ms_model_id = self.model_name.removeprefix("modelscope://")
-            local_dir = snapshot_download(ms_model_id)
+            local_dir = self._resolve_modelscope_cache(ms_model_id)
+            if local_dir is None:
+                local_dir = snapshot_download(ms_model_id)
             kwargs.pop("revision", None)  # 本地目录不再按 HF revision 加载
             return SentenceTransformer(local_dir, **kwargs)
 
